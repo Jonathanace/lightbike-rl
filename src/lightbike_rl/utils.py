@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-from constants import COLOR_MAP
+from lightbike_rl.constants import COLOR_MAP
 
 pixel_size = 5
 grid_color = (128, 128, 128)  # Gray

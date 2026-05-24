@@ -1,7 +1,8 @@
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
+from gymnasium.spaces import Space
 from typing import NamedTuple
 from collections import defaultdict
-from utils import render
+from lightbike_rl.utils import render
 import random
 import logging
 import json
@@ -13,7 +14,8 @@ from enum import IntEnum
 import gymnasium as gym
 import numpy as np
 from dataclasses import dataclass
-from constants import COLOR_MAP
+from lightbike_rl.constants import COLOR_MAP
+from gymnasium.spaces import flatten_space, flatten
 
 @dataclass
 class EnvParams:
@@ -33,7 +35,6 @@ class EnvParams:
 class WorkerConfig:
     log_dir: str = "replays"
 
-# DirPayload = namedtuple('DirPayload', ['name', 'idx', 'coords'])
 class DirPayload(NamedTuple):
     name: str
     idx: int
@@ -69,15 +70,15 @@ DIR_MAP = create_dir_map(directions)
 class LightBikeEnv(MultiAgentEnv):
     _distance_obs = gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
 
-    ACTION_SPACE = gym.spaces.Discrete(3) # Left, right, forward
+    _ACTION_SPACE = gym.spaces.Discrete(3) # Left, right, forward
 
-    def _get_observation_space(self, agent_id=None) -> dict:
+    def _get_observation_space(self) -> dict[str, Space]:
         return {
             # Distances to nearest wall
             "distances": gym.spaces.Box(
                 low=0,
                 high=1,
-                shape=(self.num_players, len(directions)-1),
+                shape=(self.num_players, len(directions)),
                 dtype=np.float32
             ),
             # Player positions
@@ -91,10 +92,11 @@ class LightBikeEnv(MultiAgentEnv):
             "pos_diff": gym.spaces.Box(
                 low=-1,
                 high=1,
-                shape=(2,),
+                shape=(self.num_players, self.num_players),
                 dtype=np.float32
             )
         }
+
 
 
     def __init__(self, config=None, env_config=None, debug=False):
@@ -131,9 +133,17 @@ class LightBikeEnv(MultiAgentEnv):
         self.grid = np.empty_like(self.starting_grid)
         self.starting_positions += 1
 
-        # Other
-        self.observation_space = gym.spaces.Dict(self._get_observation_space())
-        self.action_space = gym.spaces.Dict({str(agent): self.ACTION_SPACE for agent in self.agents})
+        self.internal_obs_space = gym.spaces.Dict(self._get_observation_space())
+
+        self.flat_obs_space = flatten_space(self.internal_obs_space)
+
+        self.observation_space = gym.spaces.Dict({
+            str(agent): self.flat_obs_space for agent in self.agents
+        })
+
+        self.action_space = gym.spaces.Dict({
+            str(agent): self._ACTION_SPACE for agent in self.agents
+        })
 
         self.ended = False
         self.debug = debug
@@ -172,7 +182,7 @@ class LightBikeEnv(MultiAgentEnv):
             localized_obs = self._localize_obs(normalized_obs, i)
             obs[obs_name] = localized_obs
 
-        return obs
+        return flatten(self.internal_obs_space, obs)
 
     @property
     def distances(self):
@@ -242,12 +252,14 @@ class LightBikeEnv(MultiAgentEnv):
 
         # CHECK IF GAME ENDED
         if sum(self.alive) == 1:
-            terminateds = {"__all__": True}
+            terminateds["__all__"] = True
             winner = f"player_{self.alive.index(1)}"
             rewards[winner] = 1
             logging.debug(f"{winner} wins!")
             self.ended = True
             self.save_replay()
+        else:
+            terminateds["__all__"] = False
 
         return observations, rewards, terminateds, {}, {}
 
@@ -256,6 +268,7 @@ class LightBikeEnv(MultiAgentEnv):
         action_name, _, dy_dx = DIR_MAP[action_num]
 
         logging.debug(f"Player {player_i}: {action_name} ({action_num})")
+        self.episode[f"player_{player_i}"].append(action_name)
 
         old_pos = self.positions[player_i]
 
@@ -287,7 +300,6 @@ class LightBikeEnv(MultiAgentEnv):
             render(self.grid)
             if self.ended:
                 break
-
 
 
 if __name__ == "__main__":
