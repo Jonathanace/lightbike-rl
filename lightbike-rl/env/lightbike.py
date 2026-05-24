@@ -1,4 +1,3 @@
-from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from gymnasium.spaces import Space
 from typing import NamedTuple
 from collections import defaultdict
@@ -8,8 +7,6 @@ import logging
 import json
 import uuid
 import os
-from numba import int32
-from numba.experimental import jitclass
 from enum import IntEnum
 import gymnasium as gym
 import numpy as np
