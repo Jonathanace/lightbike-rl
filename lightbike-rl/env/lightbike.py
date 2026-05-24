@@ -1,4 +1,5 @@
 from gymnasium.spaces import Space
+from pettingzoo import ParallelEnv
 from typing import NamedTuple
 from collections import defaultdict
 from lightbike_rl.utils import render
@@ -64,40 +65,16 @@ directions = [
 DIR_MAP = create_dir_map(directions)
 
 
-class LightBikeEnv(MultiAgentEnv):
+class LightBikeEnv(ParallelEnv):
     _distance_obs = gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
 
     _ACTION_SPACE = gym.spaces.Discrete(3) # Left, right, forward
 
-    def _get_observation_space(self) -> dict[str, Space]:
-        return {
-            # Distances to nearest wall
-            "distances": gym.spaces.Box(
-                low=0,
-                high=1,
-                shape=(self.num_players, len(directions)),
-                dtype=np.float32
-            ),
-            # Player positions
-            "positions": gym.spaces.Box(
-                low=0,
-                high=1,
-                shape=(self.num_players, 2),
-                dtype=np.float32
-            ),
-
-            "pos_diff": gym.spaces.Box(
-                low=-1,
-                high=1,
-                shape=(self.num_players, self.num_players),
-                dtype=np.float32
-            )
-        }
-
-
+    metadata = {
+        "name": "liightbike_v0"
+    }
 
     def __init__(self, config=None, env_config=None, debug=False):
-        super().__init__()
 
         # Params
         env_config = env_config or {}
@@ -133,15 +110,6 @@ class LightBikeEnv(MultiAgentEnv):
         self.internal_obs_space = gym.spaces.Dict(self._get_observation_space())
 
         self.flat_obs_space = flatten_space(self.internal_obs_space)
-
-        self.observation_space = gym.spaces.Dict({
-            str(agent): self.flat_obs_space for agent in self.agents
-        })
-
-        self.action_space = gym.spaces.Dict({
-            str(agent): self._ACTION_SPACE for agent in self.agents
-        })
-
         self.ended = False
         self.debug = debug
         self.episode = defaultdict(list)
@@ -149,10 +117,62 @@ class LightBikeEnv(MultiAgentEnv):
         if self.debug:
             logging.debug("Debug mode activated.")
 
-
-    def reset(self, *, seed=None, options=None):
+    def reset(self, seed=None, options=None):
         self._reset_game()
         return self._get_all_obs(), {}
+
+    def step(self, action_dict):
+        if not action_dict:
+            logging.debug("No action dict passed")
+            action_dict = {player: 0 for player in self.agents}
+
+
+        rewards, terminateds = {}, {}
+        for i, player in enumerate(self.agents):
+            action = action_dict[player]
+            reward, terminated = self._step_player(i, action)
+            rewards[player] = reward
+            terminateds[player] = terminated
+
+        observations = self._get_all_obs()
+
+        # CHECK IF GAME ENDED
+        if sum(self.alive) == 1:
+            terminateds["__all__"] = True
+            winner = f"player_{self.alive.index(1)}"
+            rewards[winner] = 1
+            logging.debug(f"{winner} wins!")
+            self.ended = True
+            self.save_replay()
+        else:
+            terminateds["__all__"] = False
+
+        return observations, rewards, terminateds, {}, {}
+
+    def _get_observation_space(self) -> dict[str, Space]:
+        return {
+            # Distances to nearest wall
+            "distances": gym.spaces.Box(
+                low=0,
+                high=1,
+                shape=(self.num_players, len(directions)),
+                dtype=np.float32
+            ),
+            # Player positions
+            "positions": gym.spaces.Box(
+                low=0,
+                high=1,
+                shape=(self.num_players, 2),
+                dtype=np.float32
+            ),
+
+            "pos_diff": gym.spaces.Box(
+                low=-1,
+                high=1,
+                shape=(self.num_players, self.num_players),
+                dtype=np.float32
+            )
+        }
 
     def _reset_game(self):
         np.copyto(self.positions, self.starting_positions)
@@ -232,33 +252,6 @@ class LightBikeEnv(MultiAgentEnv):
         d_x, d_y = target_direction
         return
 
-    def step(self, action_dict=None):
-        if not action_dict:
-            logging.debug("No action dict passed")
-            action_dict = {player: 0 for player in self.agents}
-
-
-        rewards, terminateds = {}, {}
-        for i, player in enumerate(self.agents):
-            action = action_dict[player]
-            reward, terminated = self._step_player(i, action)
-            rewards[player] = reward
-            terminateds[player] = terminated
-
-        observations = self._get_all_obs()
-
-        # CHECK IF GAME ENDED
-        if sum(self.alive) == 1:
-            terminateds["__all__"] = True
-            winner = f"player_{self.alive.index(1)}"
-            rewards[winner] = 1
-            logging.debug(f"{winner} wins!")
-            self.ended = True
-            self.save_replay()
-        else:
-            terminateds["__all__"] = False
-
-        return observations, rewards, terminateds, {}, {}
 
 
     def _step_player(self, player_i, action_num) -> tuple[float, bool]:
