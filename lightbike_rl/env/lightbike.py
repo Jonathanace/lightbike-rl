@@ -103,7 +103,7 @@ class LightBikeEnv(ParallelEnv):
         self.debug = debug
         self.episode = defaultdict(list)
 
-        self.dict_space = {
+        self.dict_space: dict[str, Space] = {
                 # Distances to nearest wall
                 "distances": gym.spaces.Box(
                     low=0,
@@ -111,6 +111,7 @@ class LightBikeEnv(ParallelEnv):
                     shape=(self.num_players, len(directions)),
                     dtype=np.float32
                 ),
+
                 # Player positions
                 "positions": gym.spaces.Box(
                     low=0,
@@ -119,6 +120,7 @@ class LightBikeEnv(ParallelEnv):
                     dtype=np.float32
                 ),
 
+                # Distances to players
                 "pos_diff": gym.spaces.Box(
                     low=-1,
                     high=1,
@@ -154,7 +156,6 @@ class LightBikeEnv(ParallelEnv):
         observations = self._get_all_obs()
 
         # CHECK IF GAME ENDED
-
         if sum(self.alive) == 1:
             win_player_idx = self.alive.index(1)
             winner = f"player_{win_player_idx}"
@@ -162,11 +163,8 @@ class LightBikeEnv(ParallelEnv):
             self.ended = True
             self.save_replay()
 
-
         terminations = {a: self.ended for a in self.agents}
         rewards = {a: 1.0 if a == self.winner else 0 for a in self.agents}
-
-
 
         truncated = {a: False for a in self.agents} # used for early stopping (max steps)
         self.agents = [a for a in self.agents if not terminations[a]]
