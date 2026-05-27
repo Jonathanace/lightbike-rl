@@ -1,21 +1,17 @@
-from ray.rllib.env.multi_agent_env import MultiAgentEnv
-from gymnasium.spaces import Space
+from gymnasium.spaces import Space, Dict, Discrete
+from datetime import date
+from pettingzoo.test import parallel_api_test
+from pettingzoo import ParallelEnv
 from typing import NamedTuple
 from collections import defaultdict
 from lightbike_rl.utils import render
-import random
 import logging
 import json
 import uuid
 import os
-from numba import int32
-from numba.experimental import jitclass
-from enum import IntEnum
 import gymnasium as gym
 import numpy as np
 from dataclasses import dataclass
-from lightbike_rl.constants import COLOR_MAP
-from gymnasium.spaces import flatten_space, flatten
 
 @dataclass
 class EnvParams:
@@ -30,16 +26,13 @@ class EnvParams:
     # max_sensor_range: int = -1
 
     num_players = 2
-
 @dataclass
 class WorkerConfig:
     log_dir: str = "replays"
-
 class DirPayload(NamedTuple):
     name: str
     idx: int
     coords: tuple[int, int]
-
 
 def create_dir_map(directions_list):
     mapping = {}
@@ -51,7 +44,6 @@ def create_dir_map(directions_list):
         mapping[coords] = payload
 
     return mapping
-
 
 directions = [
     ("L",  (0, -1)),
@@ -65,42 +57,14 @@ directions = [
 ]
 
 DIR_MAP = create_dir_map(directions)
-
-
-class LightBikeEnv(MultiAgentEnv):
+class LightBikeEnv(ParallelEnv):
     _distance_obs = gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
 
-    _ACTION_SPACE = gym.spaces.Discrete(3) # Left, right, forward
-
-    def _get_observation_space(self) -> dict[str, Space]:
-        return {
-            # Distances to nearest wall
-            "distances": gym.spaces.Box(
-                low=0,
-                high=1,
-                shape=(self.num_players, len(directions)),
-                dtype=np.float32
-            ),
-            # Player positions
-            "positions": gym.spaces.Box(
-                low=0,
-                high=1,
-                shape=(self.num_players, 2),
-                dtype=np.float32
-            ),
-
-            "pos_diff": gym.spaces.Box(
-                low=-1,
-                high=1,
-                shape=(self.num_players, self.num_players),
-                dtype=np.float32
-            )
-        }
-
-
+    metadata = {
+        "name": "liightbike_v0"
+    }
 
     def __init__(self, config=None, env_config=None, debug=False):
-        super().__init__()
 
         # Params
         env_config = env_config or {}
@@ -133,31 +97,98 @@ class LightBikeEnv(MultiAgentEnv):
         self.grid = np.empty_like(self.starting_grid)
         self.starting_positions += 1
 
-        self.internal_obs_space = gym.spaces.Dict(self._get_observation_space())
 
-        self.flat_obs_space = flatten_space(self.internal_obs_space)
-
-        self.observation_space = gym.spaces.Dict({
-            str(agent): self.flat_obs_space for agent in self.agents
-        })
-
-        self.action_space = gym.spaces.Dict({
-            str(agent): self._ACTION_SPACE for agent in self.agents
-        })
-
+        self.winner = None
         self.ended = False
         self.debug = debug
         self.episode = defaultdict(list)
 
+        self.dict_space: dict[str, Space] = {
+                # Distances to nearest wall
+                "distances": gym.spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(self.num_players, len(directions)),
+                    dtype=np.float32
+                ),
+
+                # Player positions
+                "positions": gym.spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(self.num_players, 2),
+                    dtype=np.float32
+                ),
+
+                # Distances to players
+                "pos_diff": gym.spaces.Box(
+                    low=-1,
+                    high=1,
+                    shape=(self.num_players, self.num_players),
+                    dtype=np.float32
+                )
+            }
+        self.obs_space = Dict(self.dict_space)
+        self.act_space = Discrete(4)
+
         if self.debug:
             logging.debug("Debug mode activated.")
 
-
-    def reset(self, *, seed=None, options=None):
+    def reset(self, seed=None, options=None):
+        logging.debug("Resetting environment...")
         self._reset_game()
-        return self._get_all_obs(), {}
+        obs = self._get_all_obs()
+        return obs, {a: {} for a in self.agents}
+
+    def step(self, actions=None):
+        logging.debug("Step called")
+        if not actions:
+            logging.debug("No action dict passed. Selecting random actions.")
+            actions = {player: np.random.randint(0,3) for player in self.agents}
+
+        action_names = {player: DIR_MAP[action].name for player, action in actions.items()}
+        logging.debug(f"Actions: {action_names}")
+        # Perform step and get info
+        for i, player in enumerate(self.agents):
+            action = actions[player]
+            self._step_player(i, action)
+
+        observations = self._get_all_obs()
+
+        # CHECK IF GAME ENDED
+        if sum(self.alive) == 1:
+            win_player_idx = self.alive.index(1)
+            winner = f"player_{win_player_idx}"
+            logging.debug(f"{winner} wins!")
+            self.ended = True
+            self.save_replay()
+
+        terminations = {a: self.ended for a in self.agents}
+        rewards = {a: 1.0 if a == self.winner else 0 for a in self.agents}
+
+        truncated = {a: False for a in self.agents} # used for early stopping (max steps)
+        self.agents = [a for a in self.agents if not terminations[a]]
+        infos = {a: {} for a in self.agents}
+
+        return (
+            observations,
+            rewards,
+            terminations,
+            truncated,
+            infos
+        )
+
+    def render(self):
+        render(self.grid)
+
+    def observation_space(self, agent):
+        return self.obs_space
+
+    def action_space(self, agent):
+        return self.act_space
 
     def _reset_game(self):
+        self.agents = self.possible_agents
         np.copyto(self.positions, self.starting_positions)
         np.copyto(self.grid, self.starting_grid)
 
@@ -169,7 +200,7 @@ class LightBikeEnv(MultiAgentEnv):
     def _get_player_obs(self, player):
         player_idx = int(player.split("_")[1])
         obs = {}
-        for i, obs_name in enumerate(self._get_observation_space().keys()):
+        for i, obs_name in enumerate(self.dict_space.keys()):
             if not hasattr(self, obs_name):
                 raise AttributeError(f"Attribute {obs_name} does not exist.")
 
@@ -182,7 +213,7 @@ class LightBikeEnv(MultiAgentEnv):
             localized_obs = self._localize_obs(normalized_obs, i)
             obs[obs_name] = localized_obs
 
-        return flatten(self.internal_obs_space, obs)
+        return obs
 
     @property
     def distances(self):
@@ -235,35 +266,6 @@ class LightBikeEnv(MultiAgentEnv):
         d_x, d_y = target_direction
         return
 
-    def step(self, action_dict=None):
-        if not action_dict:
-            logging.debug("No action dict passed")
-            action_dict = {player: 0 for player in self.agents}
-
-
-        rewards, terminateds = {}, {}
-        for i, player in enumerate(self.agents):
-            action = action_dict[player]
-            reward, terminated = self._step_player(i, action)
-            rewards[player] = reward
-            terminateds[player] = terminated
-
-        observations = self._get_all_obs()
-
-        # CHECK IF GAME ENDED
-        if sum(self.alive) == 1:
-            terminateds["__all__"] = True
-            winner = f"player_{self.alive.index(1)}"
-            rewards[winner] = 1
-            logging.debug(f"{winner} wins!")
-            self.ended = True
-            self.save_replay()
-        else:
-            terminateds["__all__"] = False
-
-        return observations, rewards, terminateds, {}, {}
-
-
     def _step_player(self, player_i, action_num) -> tuple[float, bool]:
         action_name, _, dy_dx = DIR_MAP[action_num]
 
@@ -286,23 +288,43 @@ class LightBikeEnv(MultiAgentEnv):
     def save_replay(self):
         os.makedirs(self.config.log_dir, exist_ok=True)
         unique_id = uuid.uuid4()
-        filename = str(unique_id) + ".json"
+        filename = str(date.today()) + str(unique_id) + ".json"
         filepath = os.path.join(self.config.log_dir, filename)
         with open(filepath, "w") as f:
             json.dump(self.episode, f)
 
-
     def sample(self, n=20):
+
         self.reset()
         render(self.grid)
         for i in range(n):
             self.step()
-            render(self.grid)
             if self.ended:
                 break
+            render(self.grid)
+        self.reset()
 
+
+
+
+def sample_env():
+    env = LightBikeEnv()
+    observations, infos = env.reset(seed=42)
+    while env.agents:
+    # this is where you would insert your policy
+        actions = {agent: env.action_space(agent).sample() for agent in env.agents}
+
+        observations, rewards, terminations, truncations, infos = env.step(actions)
+        env.render()
+    env.close()
+
+def test_env():
+    logging.basicConfig(level=logging.DEBUG)
+    # sample()
+    env = LightBikeEnv()
+
+    parallel_api_test(env, num_cycles=100)
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-    env = LightBikeEnv(debug=True)
-    env.sample()
+    test_env()
+
