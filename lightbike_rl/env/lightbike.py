@@ -1,4 +1,5 @@
 from gymnasium.spaces import Space, Dict, Discrete
+import gzip
 from datetime import date
 from pettingzoo.test import parallel_api_test
 from pettingzoo import ParallelEnv
@@ -12,7 +13,6 @@ import os
 import gymnasium as gym
 import numpy as np
 from dataclasses import dataclass
-
 @dataclass
 class EnvParams:
     x_size: int = 101
@@ -65,13 +65,13 @@ class LightBikeEnv(ParallelEnv):
     }
 
     def __init__(self, config=None, env_config=None, debug=False):
-
         # Params
         env_config = env_config or {}
         self.params = EnvParams(**env_config)
 
         config = config or {}
         self.config = WorkerConfig(**config)
+        self.render_mode=None
 
         # Agents
         self.agents = self.possible_agents = [
@@ -96,7 +96,6 @@ class LightBikeEnv(ParallelEnv):
         )
         self.grid = np.empty_like(self.starting_grid)
         self.starting_positions += 1
-
 
         self.winner = None
         self.ended = False
@@ -144,31 +143,50 @@ class LightBikeEnv(ParallelEnv):
         logging.debug("Step called")
         if not actions:
             logging.debug("No action dict passed. Selecting random actions.")
-            actions = {player: np.random.randint(0,3) for player in self.agents}
+            actions = {player: np.random.randint(0, 3) for player in self.agents}
 
         action_names = {player: DIR_MAP[action].name for player, action in actions.items()}
         logging.debug(f"Actions: {action_names}")
-        # Perform step and get info
-        for i, player in enumerate(self.agents):
+
+        for player in list(self.agents):
+            player_idx = int(player.split("_")[1])
             action = actions[player]
-            self._step_player(i, action)
+            self._step_player(player_idx, action)
 
         observations = self._get_all_obs()
 
-        # CHECK IF GAME ENDED
-        if sum(self.alive) == 1:
-            win_player_idx = self.alive.index(1)
-            winner = f"player_{win_player_idx}"
-            logging.debug(f"{winner} wins!")
+        if sum(self.alive) == 0:
+            logging.debug("All players lost, game is a tie")
+            self.winner = None
             self.ended = True
+        elif sum(self.alive) == 1:
+            win_player_idx = self.alive.index(1)
+            self.winner = f"player_{win_player_idx}"
+            logging.debug(f"{self.winner} wins!")
+            self.ended = True
+
+        if self.ended:
             self.save_replay()
 
         terminations = {a: self.ended for a in self.agents}
-        rewards = {a: 1.0 if a == self.winner else 0 for a in self.agents}
 
-        truncated = {a: False for a in self.agents} # used for early stopping (max steps)
-        self.agents = [a for a in self.agents if not terminations[a]]
+        rewards = {}
+        for a in self.agents:
+            p_idx = int(a.split("_")[1])
+            if self.ended:
+                if a == self.winner:
+                    rewards[a] = 1.0
+                elif self.alive[p_idx] == 0:
+                    rewards[a] = -1.0
+                else:
+                    rewards[a] = 0.0  # Draw condition
+            else:
+                rewards[a] = 0.1  # True step survival bonus
+
+        truncated = {a: False for a in self.agents}
         infos = {a: {} for a in self.agents}
+
+        self.agents = [a for a in self.agents if not terminations[a]]
 
         return (
             observations,
@@ -200,7 +218,8 @@ class LightBikeEnv(ParallelEnv):
     def _get_player_obs(self, player):
         player_idx = int(player.split("_")[1])
         obs = {}
-        for i, obs_name in enumerate(self.dict_space.keys()):
+
+        for obs_name in self.dict_space.keys():
             if not hasattr(self, obs_name):
                 raise AttributeError(f"Attribute {obs_name} does not exist.")
 
@@ -210,7 +229,7 @@ class LightBikeEnv(ParallelEnv):
                 raise Exception(f"Observation {obs_name} is None.")
 
             normalized_obs = self._normalize(raw_obs, obs_name)
-            localized_obs = self._localize_obs(normalized_obs, i)
+            localized_obs = self._localize_obs(normalized_obs, player_idx)
             obs[obs_name] = localized_obs
 
         return obs
@@ -248,17 +267,22 @@ class LightBikeEnv(ParallelEnv):
         return np.roll(obs, shift=-idx, axis=0)
 
     def _normalize(self, obs, obs_type):
-        # TODO: FIXME
-        return obs
+        max_y = self.params.y_size
+        max_x = self.params.x_size
+
         match obs_type:
-            case "distance":
-                return
+            case "distances":
+                max_dim = max(max_y, max_x)
+                return np.array(obs, dtype=np.float32) / max_dim
+
             case "positions":
-                return
-            case "directions":
-                return
+                scale_factors = np.array([max_y, max_x], dtype=np.float32)
+                return np.array(obs, dtype=np.float32) / scale_factors
+
             case "pos_diff":
-                return
+                max_manhattan = max_y + max_x
+                return np.array(obs, dtype=np.float32) / max_manhattan
+
             case _:
                 raise ValueError(f"Invalid obs_type: {obs_type}")
 
@@ -288,13 +312,12 @@ class LightBikeEnv(ParallelEnv):
     def save_replay(self):
         os.makedirs(self.config.log_dir, exist_ok=True)
         unique_id = uuid.uuid4()
-        filename = str(date.today()) + str(unique_id) + ".json"
+        filename = str(date.today()) + str(unique_id) + ".json.gz"
         filepath = os.path.join(self.config.log_dir, filename)
-        with open(filepath, "w") as f:
+        with gzip.open(filepath, "wt", encoding="utf-8") as f:
             json.dump(self.episode, f)
 
     def sample(self, n=20):
-
         self.reset()
         render(self.grid)
         for i in range(n):
@@ -304,14 +327,10 @@ class LightBikeEnv(ParallelEnv):
             render(self.grid)
         self.reset()
 
-
-
-
 def sample_env():
     env = LightBikeEnv()
     observations, infos = env.reset(seed=42)
     while env.agents:
-    # this is where you would insert your policy
         actions = {agent: env.action_space(agent).sample() for agent in env.agents}
 
         observations, rewards, terminations, truncations, infos = env.step(actions)
@@ -320,8 +339,8 @@ def sample_env():
 
 def test_env():
     logging.basicConfig(level=logging.DEBUG)
-    # sample()
     env = LightBikeEnv()
+    env.sample()
 
     parallel_api_test(env, num_cycles=100)
 
