@@ -267,17 +267,22 @@ class LightBikeEnv(ParallelEnv):
         return np.roll(obs, shift=-idx, axis=0)
 
     def _normalize(self, obs, obs_type):
-        # TODO: FIXME
-        return obs
+        max_y = self.params.y_size
+        max_x = self.params.x_size
+
         match obs_type:
-            case "distance":
-                return
+            case "distances":
+                max_dim = max(max_y, max_x)
+                return np.array(obs, dtype=np.float32) / max_dim
+
             case "positions":
-                return
-            case "directions":
-                return
+                scale_factors = np.array([max_y, max_x], dtype=np.float32)
+                return np.array(obs, dtype=np.float32) / scale_factors
+
             case "pos_diff":
-                return
+                max_manhattan = max_y + max_x
+                return np.array(obs, dtype=np.float32) / max_manhattan
+
             case _:
                 raise ValueError(f"Invalid obs_type: {obs_type}")
 
