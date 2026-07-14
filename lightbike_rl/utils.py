@@ -7,6 +7,7 @@ grid_color = (128, 128, 128)  # Gray
 thickness = 1
 
 def render(frame):
+    import cv2
 
     height, width = frame.shape
     raw_image = np.zeros((height, width, 3), dtype=np.uint8)
@@ -20,6 +21,8 @@ def render(frame):
         raw_image, (new_width, new_height), interpolation=cv2.INTER_NEAREST
     )
 
+    return scaled_image
+
     # Gray lines
     # for x in range(0, new_width, pixel_size):
     #     cv2.line(scaled_image, (x, 0), (x, new_height), grid_color, thickness)
@@ -27,8 +30,13 @@ def render(frame):
     # for y in range(0, new_height, pixel_size):
     #     cv2.line(scaled_image, (0, y), (new_width, y), grid_color, thickness)
 
-    cv2.imshow("Rendered Grid", scaled_image)
+def draw_frame(frame):
+    image = render(frame)
+
+    cv2.imshow("Rendered Grid", image)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-
+def save_frame(frame, path="image.png"):
+    image = render(frame)
+    cv2.imwrite(path)

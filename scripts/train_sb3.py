@@ -36,7 +36,7 @@ def _train():
     )
 
     model.learn(
-        total_timesteps=500_000,
+        total_timesteps=200_000,
         progress_bar=True,
         callback=WandbCallback(
             gradient_save_freq=1000,
@@ -45,25 +45,27 @@ def _train():
         )
     )
 
-    model.save("policy_1")
+    model.save("policy_2")
 
     run.finish()
+
 def _play():
     env = lightbike_v0.parallel_env()
-    model = PPO.load("policy_1")
+    model = PPO.load("policy_2")
     observations, infos = env.reset()
     while env.agents:
             actions = {}
-            env.render()
+            env.save_frame() # can't do this on headless
 
             for agent in env.agents:
                 action, _states = model.predict(observations[agent], deterministic=True)
                 actions[agent] = action.item()
 
             observations, rewards, terminations, truncations, infos = env.step(actions)
+            input()
 
     env.close()
 
 if __name__ == "__main__":
-    _train()
+    # _train()
     _play()
