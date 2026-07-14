@@ -5,7 +5,7 @@ from pettingzoo.test import parallel_api_test
 from pettingzoo import ParallelEnv
 from typing import NamedTuple
 from collections import defaultdict
-from lightbike_rl.utils import render
+from lightbike_rl.utils import render, save_frame
 import logging
 import json
 import uuid
@@ -13,6 +13,7 @@ import os
 import gymnasium as gym
 import numpy as np
 from dataclasses import dataclass
+
 @dataclass
 class EnvParams:
     x_size: int = 101
@@ -44,6 +45,9 @@ def create_dir_map(directions_list):
         mapping[coords] = payload
 
     return mapping
+
+COMPASS = [(-1, 0), (0, 1), (1, 0), (0, -1)]
+DIR_TO_INT = {"U": 0, "R": 1, "D": 2, "L": 3}
 
 directions = [
     ("L",  (0, -1)),
@@ -95,6 +99,8 @@ class LightBikeEnv(ParallelEnv):
             self.starting_grid, pad_width=1, mode='constant', constant_values=-1
         )
         self.grid = np.empty_like(self.starting_grid)
+        self.starting_dirs_int = np.array([DIR_TO_INT[dir] for dir in self.params.starting_dirs], dtype=np.int32)
+        self.current_dirs = np.empty_like(self.starting_dirs_int)
         self.starting_positions += 1
 
         self.winner = None
@@ -128,7 +134,7 @@ class LightBikeEnv(ParallelEnv):
                 )
             }
         self.obs_space = Dict(self.dict_space)
-        self.act_space = Discrete(4)
+        self.act_space = Discrete(3)
 
         if self.debug:
             logging.debug("Debug mode activated.")
@@ -199,6 +205,9 @@ class LightBikeEnv(ParallelEnv):
     def render(self):
         render(self.grid)
 
+    def save_frame(self):
+        save_frame(self.grid)
+
     def observation_space(self, agent):
         return self.obs_space
 
@@ -209,6 +218,7 @@ class LightBikeEnv(ParallelEnv):
         self.agents = self.possible_agents
         np.copyto(self.positions, self.starting_positions)
         np.copyto(self.grid, self.starting_grid)
+        np.copyto(self.current_dirs, self.starting_dirs_int)
 
     def _get_all_obs(self):
         return {
@@ -218,6 +228,7 @@ class LightBikeEnv(ParallelEnv):
     def _get_player_obs(self, player):
         player_idx = int(player.split("_")[1])
         obs = {}
+        my_heading = self.current_dirs[player_idx]
 
         for obs_name in self.dict_space.keys():
             if not hasattr(self, obs_name):
@@ -230,6 +241,10 @@ class LightBikeEnv(ParallelEnv):
 
             normalized_obs = self._normalize(raw_obs, obs_name)
             localized_obs = self._localize_obs(normalized_obs, player_idx)
+            if obs_name == "distances":
+                # pivot distances from absolute to ego-centric
+                localized_obs = np.roll(localized_obs, shift=-(my_heading * 2), axis=1)
+
             obs[obs_name] = localized_obs
 
         return obs
@@ -291,14 +306,22 @@ class LightBikeEnv(ParallelEnv):
         return
 
     def _step_player(self, player_i, action_num) -> tuple[float, bool]:
-        action_name, _, dy_dx = DIR_MAP[action_num]
+        # 0 = Forward, 1 = Turn Left, 2 = Turn Right
+        if action_num == 1:
+            self.current_dirs[player_i] = (self.current_dirs[player_i] - 1) % 4
+        elif action_num == 2:
+            self.current_dirs[player_i] = (self.current_dirs[player_i] + 1) % 4
 
-        logging.debug(f"Player {player_i}: {action_name} ({action_num})")
+        facing_dir = self.current_dirs[player_i]
+        dy, dx = COMPASS[facing_dir]
+
+        action_name = ["Forward", "Left", "Right"][int(action_num)]
+        logging.debug(f"Player {player_i}: {action_name} (facing compass {facing_dir})")
         self.episode[f"player_{player_i}"].append(action_name)
 
         old_pos = self.positions[player_i]
 
-        new_y, new_x = old_pos + dy_dx
+        new_y, new_x = old_pos[0] + dy, old_pos[1] + dx
         if self.grid[new_y, new_x] != 0:
             self.alive[player_i] = 0
             return -1, True
