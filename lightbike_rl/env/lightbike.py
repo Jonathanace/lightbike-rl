@@ -182,15 +182,14 @@ class LightBikeEnv(ParallelEnv):
         rewards = {}
         for a in self.agents:
             p_idx = int(a.split("_")[1])
-            if self.ended:
-                if a == self.winner:
-                    rewards[a] = 1.0
-                elif self.alive[p_idx] == 0:
-                    rewards[a] = -1.0
-                else:
-                    rewards[a] = 0.0  # Draw condition
+            if not self.ended:
+                rewards[a] = 0.0
+            elif a == self.winner:
+                rewards[a] = 1.0
+            elif self.alive[p_idx] == 0:
+                rewards[a] = -1.0
             else:
-                rewards[a] = 0.1  # True step survival bonus
+                rewards[a] = 0.0  # Draw condition
 
         truncated = {a: False for a in self.agents}
         infos = {a: {} for a in self.agents}
