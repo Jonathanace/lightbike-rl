@@ -16,11 +16,13 @@ from dataclasses import dataclass
 
 @dataclass
 class EnvParams:
-    x_size: int = 101
-    y_size: int = 101
+    x_size: int = 25
+    y_size: int = 25
+    x_pos = x_size//2+1
+    y_diff = 10
 
     # Spawn Settings
-    starting_pos: tuple = ((51, 10), (51, 90)) # [row, col]
+    starting_pos: tuple = ((x_pos, y_diff), (x_pos, y_size-y_diff)) # [row, col]
     starting_dirs: tuple = ("R", "L")
 
     max_steps: int = 1000
