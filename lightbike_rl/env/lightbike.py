@@ -174,7 +174,8 @@ class LightBikeEnv(ParallelEnv):
             self.ended = True
 
         if self.ended:
-            self.save_replay()
+            # self.save_replay()
+            pass
 
         terminations = {a: self.ended for a in self.agents}
 
