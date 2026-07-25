@@ -23,20 +23,20 @@ def _train():
         env,
         verbose=1,
         tensorboard_log=f"runs/{run.id}",
-        gamma=0.95,
-        n_steps=256,
-        ent_coef=0.0905168,
-        learning_rate=0.0001,
-        vf_coef=0.042202,
-        max_grad_norm=0.9,
-        gae_lambda=0.99,
-        n_epochs=5,
-        clip_range=0.3,
-        batch_size=256
+        gamma=0.995,
+        n_steps=1024,
+        ent_coef=0.01,
+        learning_rate=0.0003,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
+        gae_lambda=0.95,
+        n_epochs=10,
+        clip_range=0.2,
+        batch_size=2048
     )
 
     model.learn(
-        total_timesteps=200_000,
+        total_timesteps=5_000_000,
         progress_bar=True,
         callback=WandbCallback(
             gradient_save_freq=1000,
@@ -45,17 +45,17 @@ def _train():
         )
     )
 
-    model.save("policy_2")
+    model.save("policy_3")
 
     run.finish()
 
 def _play():
     env = lightbike_v0.parallel_env()
-    model = PPO.load("policy_2")
+    model = PPO.load("policy_3")
     observations, infos = env.reset()
     while env.agents:
             actions = {}
-            env.save_frame() # can't do this on headless
+            # env.save_frame() # can't do this on headless
 
             for agent in env.agents:
                 action, _states = model.predict(observations[agent], deterministic=True)
@@ -67,5 +67,5 @@ def _play():
     env.close()
 
 if __name__ == "__main__":
-    # _train()
-    _play()
+    _train()
+    # _play()
