@@ -16,6 +16,7 @@ dependencies = [
     "rllib>=0.0.1",
     "scipy>=1.17.1",
     "stable-baselines3[extra]>=2.9.0",
+    "streamlit>=1.59.2",
     "supersuit>=3.10.0",
     "tensorboard>=2.21.0",
     "torch>=2.12.0",
