@@ -331,8 +331,7 @@ class LightBikeEnv(ParallelEnv):
         self.grid[new_y, new_x] = player_i+1
         self.positions[player_i] = [new_y, new_x]
 
-        reward = 0.1 # FIXME
-        return reward, False
+        return
 
     def save_replay(self):
         os.makedirs(self.config.log_dir, exist_ok=True)
