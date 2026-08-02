@@ -1,7 +1,7 @@
 import logging
 import supersuit as ss
 from stable_baselines3 import PPO
-from stable_baselines3.ppo import MultiInputPolicy
+from stable_baselines3.ppo import MultiInputPolicy, CnnPolicy
 from lightbike_rl import lightbike_v0
 
 import wandb
@@ -19,7 +19,7 @@ def _train():
     env = ss.concat_vec_envs_v1(env, 8, num_cpus=1, base_class='stable_baselines3')
 
     model = PPO(
-        MultiInputPolicy,
+        CnnPolicy,
         env,
         verbose=1,
         tensorboard_log=f"runs/{run.id}",
@@ -36,29 +36,29 @@ def _train():
     )
 
     model.learn(
-        total_timesteps=5_000_000,
+        total_timesteps=2_000_000,
         progress_bar=True,
         callback=WandbCallback(
-            gradient_save_freq=1000,
+            gradient_save_freq=500_000,
             model_save_path=f"models/{run.id}",
             verbose=2,
         )
     )
 
-    model.save("policy_3")
+    model.save("policy_5")
 
     run.finish()
 
 def _play():
     env = lightbike_v0.parallel_env()
-    model = PPO.load("policy_3")
+    model = PPO.load("policy_6")
     observations, infos = env.reset()
     while env.agents:
             actions = {}
             # env.save_frame() # can't do this on headless
 
             for agent in env.agents:
-                action, _states = model.predict(observations[agent], deterministic=True)
+                action, _states = model.predict(observations[agent], deterministic=False)
                 actions[agent] = action.item()
 
             observations, rewards, terminations, truncations, infos = env.step(actions)

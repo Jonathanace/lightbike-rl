@@ -16,8 +16,8 @@ from dataclasses import dataclass
 
 @dataclass
 class EnvParams:
-    x_size: int = 25
-    y_size: int = 25
+    x_size: int = 51
+    y_size: int = 51
     x_pos = x_size//2+1
     y_diff = 10
 
@@ -48,18 +48,13 @@ def create_dir_map(directions_list):
 
     return mapping
 
-COMPASS = [(-1, 0), (0, 1), (1, 0), (0, -1)]
 DIR_TO_INT = {"U": 0, "R": 1, "D": 2, "L": 3}
 
 directions = [
-    ("L",  (0, -1)),
-    ("R",  (0, 1)),
     ("U",  (-1, 0)),
+    ("R",  (0, 1)),
     ("D",  (1, 0)),
-    ("UL", (-1, -1)),
-    ("UR", (-1, 1)),
-    ("BL", (1, -1)),
-    ("BR", (1, 1))
+    ("L",  (0, -1)),
 ]
 
 DIR_MAP = create_dir_map(directions)
@@ -98,7 +93,7 @@ class LightBikeEnv(ParallelEnv):
             self.positions[player_i] = pos
 
         self.starting_grid = np.pad(
-            self.starting_grid, pad_width=1, mode='constant', constant_values=-1
+            self.starting_grid, pad_width=1, mode='constant', constant_values=255
         )
         self.grid = np.empty_like(self.starting_grid)
         self.starting_dirs_int = np.array([DIR_TO_INT[dir] for dir in self.params.starting_dirs], dtype=np.int32)
@@ -110,33 +105,34 @@ class LightBikeEnv(ParallelEnv):
         self.debug = debug
         self.episode = defaultdict(list)
 
-        self.dict_space: dict[str, Space] = {
-                # Distances to nearest wall
-                "distances": gym.spaces.Box(
-                    low=0,
-                    high=1,
-                    shape=(self.num_players, len(directions)),
-                    dtype=np.float32
-                ),
+        # self.dict_space: dict[str, Space] = {
+        #         # Distances to nearest wall
+        #         "distances": gym.spaces.Box(
+        #             low=0,
+        #             high=1,
+        #             shape=(self.num_players, len(directions)),
+        #             dtype=np.float32
+        #         ),
 
-                # Player positions
-                "positions": gym.spaces.Box(
-                    low=0,
-                    high=1,
-                    shape=(self.num_players, 2),
-                    dtype=np.float32
-                ),
+        #         # Player positions
+        #         "positions": gym.spaces.Box(
+        #             low=0,
+        #             high=1,
+        #             shape=(self.num_players, 2),
+        #             dtype=np.float32
+        #         ),
 
-                # Distances to players
-                "pos_diff": gym.spaces.Box(
-                    low=-1,
-                    high=1,
-                    shape=(self.num_players, self.num_players),
-                    dtype=np.float32
-                )
-            }
-        self.obs_space = Dict(self.dict_space)
-        self.act_space = Discrete(3)
+        #         # Distances to players
+        #         "pos_diff": gym.spaces.Box(
+        #             low=-1,
+        #             high=1,
+        #             shape=(self.num_players, self.num_players),
+        #             dtype=np.float32
+        #         )
+        #     }
+        self.obs_space = gym.spaces.Box(low=0, high=255,
+                                            shape=(3, self.starting_grid.shape[0], self.starting_grid.shape[1]), dtype=np.uint8)
+        self.act_space = Discrete(4)
 
         if self.debug:
             logging.debug("Debug mode activated.")
@@ -151,7 +147,7 @@ class LightBikeEnv(ParallelEnv):
         logging.debug("Step called")
         if not actions:
             logging.debug("No action dict passed. Selecting random actions.")
-            actions = {player: np.random.randint(0, 3) for player in self.agents}
+            actions = {player: np.random.randint(0, 4) for player in self.agents}
 
         action_names = {player: DIR_MAP[action].name for player, action in actions.items()}
         logging.debug(f"Actions: {action_names}")
@@ -224,114 +220,104 @@ class LightBikeEnv(ParallelEnv):
 
     def _get_all_obs(self):
         return {
-            agent: self._get_player_obs(agent) for agent in self.agents
+            agent: self._get_player_obs(agent_i) for agent_i, agent in enumerate(self.agents)
         }
 
-    def _get_player_obs(self, player):
-        player_idx = int(player.split("_")[1])
-        obs = {}
-        my_heading = self.current_dirs[player_idx]
+    def _get_player_obs(self, player_idx: int) -> np.ndarray:
+        obs = np.zeros((3, self.grid.shape[0], self.grid.shape[1]), dtype=np.uint8)
 
-        for obs_name in self.dict_space.keys():
-            if not hasattr(self, obs_name):
-                raise AttributeError(f"Attribute {obs_name} does not exist.")
+        my_id = player_idx + 1
+        opp_id = 2 if my_id == 1 else 1
 
-            raw_obs = getattr(self, obs_name)
+        # Current player head
+        obs[0] = (self.grid == my_id) * 255
 
-            if raw_obs is None:
-                raise Exception(f"Observation {obs_name} is None.")
+        opps_ids = [i+1 for i in range(0, self.num_players) if i != player_idx]
+        obs[1] = np.isin(self.grid, opps_ids) * 255
 
-            normalized_obs = self._normalize(raw_obs, obs_name)
-            localized_obs = self._localize_obs(normalized_obs, player_idx)
-            if obs_name == "distances":
-                # pivot distances from absolute to ego-centric
-                localized_obs = np.roll(localized_obs, shift=-(my_heading * 2), axis=1)
-
-            obs[obs_name] = localized_obs
+        obs[2] = (self.grid == 255) * 255
 
         return obs
 
-    @property
-    def distances(self):
-        return [self._get_distance(player_i) for player_i in range(self.num_players)]
+    # @property
+    # def distances(self):
+    #     return [self._get_distance(player_i) for player_i in range(self.num_players)]
 
-    @property
-    def pos_diff(self):
-        abs_diff = np.abs(self.positions[:, None, :] - self.positions[None, :, :])
-        manhattan_matrix = np.sum(abs_diff, axis=-1)
-        return manhattan_matrix.astype(np.float32)
+    # @property
+    # def pos_diff(self):
+    #     abs_diff = np.abs(self.positions[:, None, :] - self.positions[None, :, :])
+    #     manhattan_matrix = np.sum(abs_diff, axis=-1)
+    #     return manhattan_matrix.astype(np.float32)
 
-    def _get_distance(self, player_i):
-        y, x = self.positions[player_i]
-        distances = []
-        for dir_i in range(len(directions)):
-            dy, dx = DIR_MAP[dir_i].coords
-            steps = 1
-            while True:
-                target_x = x + steps * dx
-                target_y = y + steps * dy
-                target = self.grid[target_y, target_x]
-                if target != 0:
-                    distances.append(steps)
-                    break
-                steps += 1
-                if steps > max(self.grid.shape):
-                    error = f"y: {target_y}, x: {target_x} is out of bounds for grid dimensions {self.grid.shape}"
-                    raise ValueError(error)
-        return distances
+    # def _get_distance(self, player_i):
+    #     y, x = self.positions[player_i]
+    #     distances = []
+    #     for dir_i in range(len(directions)):
+    #         dy, dx = DIR_MAP[dir_i].coords
+    #         steps = 1
+    #         while True:
+    #             target_x = x + steps * dx
+    #             target_y = y + steps * dy
+    #             target = self.grid[target_y, target_x]
+    #             if target != 0:
+    #                 distances.append(steps)
+    #                 break
+    #             steps += 1
+    #             if steps > max(self.grid.shape):
+    #                 error = f"y: {target_y}, x: {target_x} is out of bounds for grid dimensions {self.grid.shape}"
+    #                 raise ValueError(error)
+    #     return distances
 
-    def _localize_obs(self, obs, idx):
-        return np.roll(obs, shift=-idx, axis=0)
+    # def _localize_obs(self, obs, idx):
+    #     return np.roll(obs, shift=-idx, axis=0)
 
-    def _normalize(self, obs, obs_type):
-        max_y = self.params.y_size
-        max_x = self.params.x_size
+    # def _normalize(self, obs, obs_type):
+    #     max_y = self.params.y_size
+    #     max_x = self.params.x_size
 
-        match obs_type:
-            case "distances":
-                max_dim = max(max_y, max_x)
-                return np.array(obs, dtype=np.float32) / max_dim
+    #     match obs_type:
+    #         case "distances":
+    #             max_dim = max(max_y, max_x)
+    #             return np.array(obs, dtype=np.float32) / max_dim
 
-            case "positions":
-                scale_factors = np.array([max_y, max_x], dtype=np.float32)
-                return np.array(obs, dtype=np.float32) / scale_factors
+    #         case "positions":
+    #             scale_factors = np.array([max_y, max_x], dtype=np.float32)
+    #             return np.array(obs, dtype=np.float32) / scale_factors
 
-            case "pos_diff":
-                max_manhattan = max_y + max_x
-                return np.array(obs, dtype=np.float32) / max_manhattan
+    #         case "pos_diff":
+    #             max_manhattan = max_y + max_x
+    #             return np.array(obs, dtype=np.float32) / max_manhattan
 
-            case _:
-                raise ValueError(f"Invalid obs_type: {obs_type}")
+    #         case _:
+    #             raise ValueError(f"Invalid obs_type: {obs_type}")
 
-    def _get_dist(self, player_idx, target_direction):
-        d_x, d_y = target_direction
-        return
+    # def _get_dist(self, player_idx, target_direction):
+    #     d_x, d_y = target_direction
+    #     return
 
-    def _step_player(self, player_i, action_num) -> tuple[float, bool]:
-        # 0 = Forward, 1 = Turn Left, 2 = Turn Right
-        if action_num == 1:
-            self.current_dirs[player_i] = (self.current_dirs[player_i] - 1) % 4
-        elif action_num == 2:
-            self.current_dirs[player_i] = (self.current_dirs[player_i] + 1) % 4
+    def _step_player(self, player_i: int, action_num: int) -> tuple[float, bool]:
+        # 0 = Up, 1 = Right, 2 = Down, 3 = Left
+        dy, dx = DIR_MAP[action_num].coords
 
-        facing_dir = self.current_dirs[player_i]
-        dy, dx = COMPASS[facing_dir]
+        old_y, old_x = self.positions[player_i]
+        new_y, new_x = old_y + dy, old_x + dx
 
-        action_name = ["Forward", "Left", "Right"][int(action_num)]
-        logging.debug(f"Player {player_i}: {action_name} (facing compass {facing_dir})")
-        self.episode[f"player_{player_i}"].append(action_name)
+       # boundary check
+        if new_y < 0 or new_y >= self.grid.shape[0] or new_x < 0 or new_x >= self.grid.shape[1]:
+            self.alive[player_i] = 0
+            return -1.0, True
 
-        old_pos = self.positions[player_i]
-
-        new_y, new_x = old_pos[0] + dy, old_pos[1] + dx
+        # Collision check
         if self.grid[new_y, new_x] != 0:
             self.alive[player_i] = 0
-            return -1, True
+            return -1.0, True
 
-        self.grid[new_y, new_x] = player_i+1
-        self.positions[player_i] = [new_y, new_x]
+        # Update state
+        self.positions[player_i] = (new_y, new_x)
+        self.grid[new_y, new_x] = player_i + 1
+        self.grid[old_y, old_x] = 255
 
-        return
+        return 0.0, False
 
     def save_replay(self):
         os.makedirs(self.config.log_dir, exist_ok=True)
@@ -351,14 +337,17 @@ class LightBikeEnv(ParallelEnv):
             render(self.grid)
         self.reset()
 
+
 def sample_env():
     env = LightBikeEnv()
     observations, infos = env.reset(seed=42)
     while env.agents:
         actions = {agent: env.action_space(agent).sample() for agent in env.agents}
-
         observations, rewards, terminations, truncations, infos = env.step(actions)
-        env.render()
+
+        print(actions)
+        env.render_in_terminal()
+        input("Press any key to continue...")
     env.close()
 
 def test_env():
@@ -370,4 +359,4 @@ def test_env():
 
 if __name__ == "__main__":
     test_env()
-
+    sample_env()
