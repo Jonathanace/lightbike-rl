@@ -179,7 +179,7 @@ class LightBikeEnv(ParallelEnv):
         for a in self.agents:
             p_idx = int(a.split("_")[1])
             if not self.ended:
-                rewards[a] = 0.0
+                rewards[a] = 0.1
             elif a == self.winner:
                 rewards[a] = 1.0
             elif self.alive[p_idx] == 0:
