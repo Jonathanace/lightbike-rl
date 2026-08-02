@@ -337,6 +337,19 @@ class LightBikeEnv(ParallelEnv):
             render(self.grid)
         self.reset()
 
+    def render_in_terminal(self):
+        char_map = {
+            0: "· ",
+            1: "1 ",
+            2: "2 ",
+            255: "█ "
+        }
+
+        print(f"\n--- Step ---")
+        for row in self.grid:
+            row_str = "".join([char_map.get(cell, "? ") for cell in row])
+            print(row_str)
+        print("-" * (self.grid.shape[1] * 2))
 
 def sample_env():
     env = LightBikeEnv()
