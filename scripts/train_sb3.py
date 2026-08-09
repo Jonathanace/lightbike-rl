@@ -7,7 +7,13 @@ from lightbike_rl import lightbike_v0
 import wandb
 from wandb.integration.sb3 import WandbCallback
 
-def _train():
+def _train(policy_n: int | None = None):
+    if policy_n is None:
+        policies = load_policies()
+        reserved_ns = [int(policy[-5]) for policy in policies]
+        policy_n = 1
+        while policy_n in reserved_ns:
+            policy_n += 1
     run = wandb.init(
         project="lightbike-rl",
         sync_tensorboard=True,
