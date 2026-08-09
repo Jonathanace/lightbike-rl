@@ -1,10 +1,14 @@
 import numpy as np
+import glob
 import cv2
 from lightbike_rl.constants import COLOR_MAP
 
 pixel_size = 5
 grid_color = (128, 128, 128)  # Gray
 thickness = 1
+
+def load_policies():
+    return list(glob.glob("*.zip"))
 
 def render(frame):
     import cv2

@@ -15,8 +15,6 @@ ABSOLUTE_MAP = {
 
 HUMAN_AGENT_ID = "player_0"
 
-def load_policies():
-    return list(glob.glob("*.zip"))
 
 def render_grid_to_image(grid):
     rgb_array = np.zeros((grid.shape[0], grid.shape[1], 3), dtype=np.uint8)
