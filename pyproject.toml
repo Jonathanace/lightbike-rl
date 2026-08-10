@@ -18,6 +18,7 @@ dependencies = [
     "scipy>=1.17.1",
     "stable-baselines3[extra]>=2.9.0",
     "streamlit>=1.59.2",
+    "streamlit-shortcuts>=1.2.1",
     "supersuit>=3.10.0",
     "tensorboard>=2.21.0",
     "torch>=2.12.0",

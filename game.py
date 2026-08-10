@@ -1,8 +1,10 @@
 import streamlit as st
+from streamlit_shortcuts import add_shortcuts
 import numpy as np
 from PIL import Image
 from sb3_contrib import MaskablePPO
 from lightbike_rl import lightbike_v0
+from lightbike_rl.utils import load_policies
 
 # Absolute mapping matching DIR_TO_INT (U=0, R=1, D=2, L=3)
 ABSOLUTE_MAP = {
@@ -50,13 +52,21 @@ def main():
     st.write("### Controls")
     cols = st.columns(4)
     with cols[0]:
-        st.button("Up (W)", on_click=step_game, args=[0], use_container_width=True)
+        st.button("Up (W)", on_click=step_game, args=[0], use_container_width=True, key="btn_up")
     with cols[1]:
-        st.button("Left (A)", on_click=step_game, args=[3], use_container_width=True)
+        st.button("Left (A)", on_click=step_game, args=[3], use_container_width=True, key="btn_left")
     with cols[2]:
-        st.button("Down (S)", on_click=step_game, args=[2], use_container_width=True)
+        st.button("Down (S)", on_click=step_game, args=[2], use_container_width=True, key="btn_down")
     with cols[3]:
-        st.button("Right (D)", on_click=step_game, args=[1], use_container_width=True)
+        st.button("Right (D)", on_click=step_game, args=[1], use_container_width=True, key="btn_right")
+
+    # 3. Bind the physical WASD keys to the button keys!
+    add_shortcuts(
+        btn_up="w",
+        btn_left="a",
+        btn_down="s",
+        btn_right="d"
+    )
 
 def init_game(policy):
     st.session_state.model = MaskablePPO.load(policy)
