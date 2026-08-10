@@ -14,6 +14,7 @@ dependencies = [
     "pillow>=12.2.0",
     "ray[rllib]>=2.55.1",
     "rllib>=0.0.1",
+    "sb3-contrib>=2.9.0",
     "scipy>=1.17.1",
     "stable-baselines3[extra]>=2.9.0",
     "streamlit>=1.59.2",

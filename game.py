@@ -1,8 +1,7 @@
 import streamlit as st
 import numpy as np
 from PIL import Image
-import glob
-from stable_baselines3 import PPO
+from sb3_contrib import MaskablePPO
 from lightbike_rl import lightbike_v0
 
 # Absolute mapping matching DIR_TO_INT (U=0, R=1, D=2, L=3)
@@ -60,7 +59,7 @@ def main():
         st.button("Right (D)", on_click=step_game, args=[1], use_container_width=True)
 
 def init_game(policy):
-    st.session_state.model = PPO.load(policy)
+    st.session_state.model = MaskablePPO.load(policy)
     st.session_state.env = lightbike_v0.parallel_env()
     st.session_state.observations, infos = st.session_state.env.reset()
     base_env = st.session_state.env.unwrapped
@@ -89,7 +88,15 @@ def step_game(user_input):
         if agent == HUMAN_AGENT_ID:
             actions[agent] = user_input
         else:
-            action, _states = model.predict(obs[agent], deterministic=False)
+            agent_obs = obs[agent]
+
+            agent_mask = agent_obs["action_mask"]
+
+            action, _states = model.predict(
+                agent_obs,
+                action_masks=agent_mask,
+                deterministic=True
+            )
             actions[agent] = action.item()
 
     # Step environment

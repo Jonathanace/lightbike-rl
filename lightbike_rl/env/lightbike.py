@@ -1,4 +1,4 @@
-from gymnasium.spaces import Space, Dict, Discrete
+from gymnasium.spaces import Space, Dict, Discrete, Box
 import gzip
 from datetime import date
 from pettingzoo.test import parallel_api_test
@@ -50,6 +50,7 @@ def create_dir_map(directions_list):
 
 DIR_TO_INT = {"U": 0, "R": 1, "D": 2, "L": 3}
 
+# dy, dx
 directions = [
     ("U",  (-1, 0)),
     ("R",  (0, 1)),
@@ -130,8 +131,13 @@ class LightBikeEnv(ParallelEnv):
         #             dtype=np.float32
         #         )
         #     }
-        self.obs_space = gym.spaces.Box(low=0, high=255,
-                                            shape=(3, self.starting_grid.shape[0], self.starting_grid.shape[1]), dtype=np.uint8)
+        self.obs_space = Dict({
+            "observation": Box(low=0, high=255, shape=(
+                3, self.starting_grid.shape[0], self.starting_grid.shape[1]), dtype=np.uint8
+            ),
+            "action_mask": Box(low=0, high=1, shape=(4,), dtype=np.int8)
+
+        })
         self.act_space = Discrete(4)
 
         if self.debug:
@@ -223,21 +229,41 @@ class LightBikeEnv(ParallelEnv):
             agent: self._get_player_obs(agent_i) for agent_i, agent in enumerate(self.agents)
         }
 
-    def _get_player_obs(self, player_idx: int) -> np.ndarray:
+    def _get_player_obs(self, player_idx: int) -> dict[str, np.ndarray]:
         obs = np.zeros((3, self.grid.shape[0], self.grid.shape[1]), dtype=np.uint8)
 
         my_id = player_idx + 1
         opp_id = 2 if my_id == 1 else 1
 
-        # Current player head
+        # Three channel OBS for CNN
+        # Current player position
         obs[0] = (self.grid == my_id) * 255
 
+        # Opponent positions
         opps_ids = [i+1 for i in range(0, self.num_players) if i != player_idx]
         obs[1] = np.isin(self.grid, opps_ids) * 255
 
+        # Walls
         obs[2] = (self.grid == 255) * 255
 
-        return obs
+        action_mask = np.zeros(4, dtype=bool)
+        y, x = self.positions[player_idx]
+
+        for action_i, direction in enumerate(directions):
+            dy, dx = direction[1]
+            if self.grid[y+dy][x+dx] == 0:
+                action_mask[action_i] = True
+
+        # Allow any action if surrounded
+        if not np.any(action_mask):
+            action_mask = np.ones(4, dtype=bool)
+
+        observation = {
+            "observation": obs,
+            "action_mask": action_mask.astype(np.int8)
+        }
+
+        return observation
 
     # @property
     # def distances(self):
@@ -302,7 +328,7 @@ class LightBikeEnv(ParallelEnv):
         old_y, old_x = self.positions[player_i]
         new_y, new_x = old_y + dy, old_x + dx
 
-       # boundary check
+        # boundary check
         if new_y < 0 or new_y >= self.grid.shape[0] or new_x < 0 or new_x >= self.grid.shape[1]:
             self.alive[player_i] = 0
             return -1.0, True
@@ -355,7 +381,9 @@ def sample_env():
     env = LightBikeEnv()
     observations, infos = env.reset(seed=42)
     while env.agents:
-        actions = {agent: env.action_space(agent).sample() for agent in env.agents}
+        actions = {agent: env.action_space(agent).sample(
+            mask = observations[agent]["action_mask"]
+        ) for agent in env.agents}
         observations, rewards, terminations, truncations, infos = env.step(actions)
 
         print(actions)
