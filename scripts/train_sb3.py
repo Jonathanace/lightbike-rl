@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 import supersuit as ss
 from stable_baselines3 import PPO
 from stable_baselines3.ppo import MultiInputPolicy, CnnPolicy
@@ -96,7 +97,7 @@ def _train(policy_n: int | None = None):
         )
     )
 
-    model.save(f"policy_{policy_n}")
+    model.save(f"policy_{policy_n}_{datetime.now()}.zip")
 
     run.finish()
 
