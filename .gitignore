@@ -12,3 +12,6 @@ wheels/
 .vscode
 replays/
 wandb/
+models/
+runs/
+policy_*.zip
